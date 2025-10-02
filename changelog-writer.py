@@ -45,6 +45,8 @@ def get_commits_and_tags() -> list:
 # create state class for graph
 class State(TypedDict):
     messages: Annotated[list, add_messages]
+    changelog: str
+    needs_human_review: bool
 
 # Setup LLM
 llm = gpt_oss
@@ -59,10 +61,85 @@ def chatbot(state: State):
     response = llm_with_tools.invoke(state["messages"])
     return {"messages": [response]}
 
+# Define human review node
+def human_review(state: State):
+    """Human review node for changelog correction."""
+    print("\n" + "="*80)
+    print("🤖 СГЕНЕРИРОВАННЫЙ CHANGELOG:")
+    print("="*80)
+    print(state["changelog"])
+    print("="*80)
+    
+    print("\n📝 ВАРИАНТЫ ДЕЙСТВИЙ:")
+    print("1. Принять changelog как есть (введите 'accept')")
+    print("2. Исправить changelog (введите 'edit' и затем что нужно исправить)")
+    print("3. Попросить перегенерировать (введите 'regenerate')")
+    print("4. Выйти (введите 'quit')")
+    
+    while True:
+        user_input = input("\nВаш выбор: ").strip().lower()
+        
+        if user_input == 'accept':
+            print("✅ Changelog принят!")
+            print("👋 Выход из программы.")
+            exit(0)
+        elif user_input == 'edit':
+            print("\n📝 Введите требуемые исправления для changelog (завершите ввод пустой строкой):")
+            lines = []
+            while True:
+                line = input()
+                if line == "":
+                    break
+                lines.append(line)
+            
+            changelog_corrections = "\n".join(lines)
+            if changelog_corrections.strip():
+                print("💼 Changelog отправлен на доработку")
+                return {
+                    "messages": [{"role": "user", "content": f"Пользователь запросил доработку changelog:\n{changelog_corrections}"}],
+                    "changelog": changelog_corrections,
+                    "needs_human_review": False
+                }
+            else:
+                print("❌ Пустой changelog. Попробуйте снова.")
+        elif user_input == 'regenerate':
+            print("🔄 Запрашиваем перегенерацию changelog...")
+            return {
+                "messages": [{"role": "user", "content": "Пользователь просит перегенерировать changelog. Пожалуйста, создай новый changelog на основе тех же коммитов, но с улучшениями."}],
+                "needs_human_review": True
+            }
+        elif user_input == 'quit':
+            print("👋 Выход из программы.")
+            exit(0)
+        else:
+            print("❌ Неверный ввод. Попробуйте снова.")
+
+# Define changelog extraction node
+def extract_changelog(state: State):
+    """Extract changelog from LLM response and prepare for human review."""
+    last_message = state["messages"][-1]
+    if hasattr(last_message, 'content') and last_message.content:
+        changelog = last_message.content
+        return {
+            "changelog": changelog,
+            "needs_human_review": True
+        }
+    return {"needs_human_review": False}
+
+# Define conditional function for routing
+def should_review(state: State):
+    """Determine if changelog needs human review."""
+    if state.get("needs_human_review", False):
+        return "human_review"
+    else:
+        return "chatbot"
+
 # Build the graph
 graph_builder = StateGraph(State)
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tools", ToolNode(tools))
+graph_builder.add_node("extract_changelog", extract_changelog)
+graph_builder.add_node("human_review", human_review)
 
 # Add conditional edges
 graph_builder.add_conditional_edges(
@@ -73,6 +150,12 @@ graph_builder.add_conditional_edges(
 # Add edges
 graph_builder.add_edge("tools", "chatbot")
 graph_builder.add_edge(START, "chatbot")
+graph_builder.add_edge("chatbot", "extract_changelog")
+graph_builder.add_conditional_edges(
+    "extract_changelog",
+    should_review,
+)
+graph_builder.add_edge("human_review", "chatbot")
 
 # Compile the graph
 graph = graph_builder.compile()
@@ -140,10 +223,21 @@ initial_state = {
     "messages": [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
-    ]
+    ],
+    "changelog": "",
+    "needs_human_review": False
 }
 
 # Run the agent
-response = graph.invoke(initial_state, config={"recursion_limit": 10})
+print("🚀 Запуск генерации changelog...")
+response = graph.invoke(initial_state, config={"recursion_limit": 50})
 
-print(response["messages"][-1].content)
+# Final output
+if response.get("changelog"):
+    print("\n" + "="*80)
+    print("📋 ФИНАЛЬНЫЙ CHANGELOG:")
+    print("="*80)
+    print(response["changelog"])
+    print("="*80)
+else:
+    print("❌ Changelog не был сгенерирован.")
