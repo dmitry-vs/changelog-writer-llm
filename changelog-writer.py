@@ -172,6 +172,9 @@ graph_builder.add_edge("human_review", "chatbot")
 # Compile the graph
 graph = graph_builder.compile()
 
+# Print the graph in ASCII
+print(graph.get_graph().draw_ascii())
+
 # Prepare prompts and initial state
 system_prompt = """
 Ты эксперт по работе с GitHub.

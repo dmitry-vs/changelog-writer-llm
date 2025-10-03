@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "dotenv>=0.9.9",
+    "grandalf>=0.8",
     "langchain>=0.3.27",
     "langchain-gigachat>=0.3.12",
     "langchain-groq>=0.3.8",
